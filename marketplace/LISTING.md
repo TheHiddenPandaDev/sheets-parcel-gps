@@ -13,7 +13,7 @@ Everything the Marketplace SDK "Store listing" and "App configuration" pages ask
 | Category | Business tools (alternative: Productivity) |
 | Pricing | Free with paid features (the add-on is free; the API key has a free plan and paid plans) |
 | Terms of service URL | https://www.parcelgps.com/en/terms |
-| Privacy policy URL | https://www.parcelgps.com/en/privacy |
+| Privacy policy URL | https://www.parcelgps.com/en/privacy (add-on section with the Limited Use statement: https://www.parcelgps.com/en/privacy#google-sheets-add-on) |
 | Support URL | https://www.parcelgps.com/en/developers |
 | Source code (optional "Report an issue") | https://github.com/TheHiddenPandaDev/sheets-parcel-gps/issues |
 | Integration | Sheets add-on (Editor add-on) |
