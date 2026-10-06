@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html>
+<head>
+<base target="_top">
+<link rel="stylesheet" href="https://ssl.gstatic.com/docs/script/css/add-ons1.css">
+<style>
+body { padding: 12px; }
+section { margin-bottom: 18px; }
+h3 { margin: 0 0 6px; font-size: 14px; }
+input[type=password], select { width: 100%; box-sizing: border-box; }
+.row { margin-top: 8px; }
+.muted { color: #5f6368; font-size: 12px; }
+.status { margin-top: 8px; font-size: 12px; min-height: 16px; }
+.error { color: #c5221f; }
+progress { width: 100%; margin-top: 8px; }
+code { font-size: 12px; }
+dt { margin-top: 8px; }
+dd { margin: 2px 0 0; color: #5f6368; font-size: 12px; }
+</style>
+</head>
+<body>
+<p id="intro" class="muted"></p>
+
+<section>
+  <h3 id="keyLabel"></h3>
+  <input type="password" id="keyInput" autocomplete="off">
+  <div class="row">
+    <button class="action" id="keySave"></button>
+    <button id="keyRemove"></button>
+  </div>
+  <div class="status" id="keyStatus"></div>
+  <div class="row"><a id="getKey" target="_blank" rel="noopener"></a></div>
+</section>
+
+<section>
+  <h3 id="fillTitle"></h3>
+  <p class="muted" id="fillHelp"></p>
+  <label id="countryLabel" for="country"></label>
+  <select id="country"></select>
+  <div class="row">
+    <input type="checkbox" id="header"><label for="header" id="headerLabel"></label>
+  </div>
+  <div class="row">
+    <button class="action" id="fillStart"></button>
+    <button id="fillStop" disabled></button>
+  </div>
+  <progress id="progress" value="0" max="1" hidden></progress>
+  <div class="status" id="fillStatus"></div>
+</section>
+
+<section>
+  <h3 id="helpTitle"></h3>
+  <dl>
+    <dt><code>=PARCEL_COORDS(ref, [country])</code></dt><dd id="helpCoords"></dd>
+    <dt><code>=PARCEL_AREA(ref, [country])</code></dt><dd id="helpArea"></dd>
+    <dt><code>=PARCEL_MUNICIPALITY(ref, [country])</code></dt><dd id="helpMunicipality"></dd>
+    <dt><code>=PARCEL_INFO(ref, [country])</code></dt><dd id="helpInfo"></dd>
+    <dt><code>=PARCEL_AT(lat, lon, [country])</code></dt><dd id="helpAt"></dd>
+  </dl>
+  <p class="muted" id="helpCountry"></p>
+</section>
+
+<script>
+var CHUNK_SIZE = 10;
+var MS_PER_SECOND = 1000;
+var model = null;
+var job = null;
+
+function el(id) { return document.getElementById(id); }
+
+function format(template, params) {
+  return template.replace(/\{(\w+)\}/g, function (match, name) {
+    return params[name] !== undefined ? String(params[name]) : match;
+  });
+}
+
+function setStatus(id, text, isError) {
+  var node = el(id);
+  node.textContent = text || '';
+  node.className = 'status' + (isError ? ' error' : '');
+}
+
+function applyModel(next) {
+  model = next;
+  var s = model.strings;
+  ['intro', 'keyLabel', 'keySave', 'keyRemove', 'getKey', 'fillTitle', 'fillHelp', 'countryLabel', 'headerLabel',
+    'fillStart', 'fillStop', 'helpTitle', 'helpCoords', 'helpArea', 'helpMunicipality', 'helpInfo', 'helpAt',
+    'helpCountry'].forEach(function (id) { el(id).textContent = s[id]; });
+  el('keyInput').placeholder = s.keyPlaceholder;
+  el('getKey').href = model.developerUrl;
+  setStatus('keyStatus', model.keyEnding ? format(s.keySaved, { last: model.keyEnding }) : s.keyMissing, false);
+  var select = el('country');
+  if (!select.options.length) {
+    select.appendChild(new Option(s.countryAuto, ''));
+    model.countries.forEach(function (code) { select.appendChild(new Option(code, code)); });
+  }
+}
+
+function fail(id) {
+  return function (error) { setStatus(id, error && error.message ? error.message : String(error), true); };
+}
+
+el('keySave').onclick = function () {
+  var value = el('keyInput').value.trim();
+  if (!value) { setStatus('keyStatus', model.strings.keyEmpty, true); return; }
+  google.script.run.withSuccessHandler(function (next) {
+    el('keyInput').value = '';
+    applyModel(next);
+  }).withFailureHandler(fail('keyStatus')).pgpsSaveKey(value);
+};
+
+el('keyRemove').onclick = function () {
+  google.script.run.withSuccessHandler(function (next) {
+    applyModel(next);
+    setStatus('keyStatus', model.strings.keyRemoved, false);
+  }).withFailureHandler(fail('keyStatus')).pgpsRemoveKey();
+};
+
+function setRunning(running) {
+  el('fillStart').disabled = running;
+  el('fillStop').disabled = !running;
+  el('progress').hidden = !running && !job;
+}
+
+function finish(text, isError) {
+  job = null;
+  setRunning(false);
+  setStatus('fillStatus', text, isError);
+}
+
+function updateProgress() {
+  el('progress').max = job.total;
+  el('progress').value = job.done;
+  setStatus('fillStatus', format(model.strings.fillProgress, { done: job.done, total: job.total }), false);
+}
+
+function nextChunk() {
+  if (!job) return;
+  if (job.cancelled) { finish(model.strings.fillCancelled, false); return; }
+  if (!job.queue.length) {
+    finish(format(model.strings.fillDone, { ok: job.ok, failed: job.failed }), false);
+    return;
+  }
+  var offsets = job.queue.splice(0, CHUNK_SIZE);
+  google.script.run.withSuccessHandler(function (result) {
+    job.ok += result.ok;
+    job.failed += result.failed;
+    job.done += offsets.length - result.retryOffsets.length;
+    updateProgress();
+    if (result.stop) {
+      finish(format(model.strings.fillStopped, { reason: result.stop }), true);
+      return;
+    }
+    if (result.retryOffsets.length) {
+      job.queue = result.retryOffsets.concat(job.queue);
+      setStatus('fillStatus', format(model.strings.fillPaused, { seconds: result.retryAfter }), false);
+      setTimeout(nextChunk, result.retryAfter * MS_PER_SECOND);
+      return;
+    }
+    nextChunk();
+  }).withFailureHandler(function (error) {
+    finish(error && error.message ? error.message : String(error), true);
+  }).pgpsFillRows({
+    sheetName: job.sheetName, row: job.row, column: job.column, offsets: offsets, country: job.country
+  });
+}
+
+function start(selection) {
+  if (selection.error) { setStatus('fillStatus', selection.error, true); return; }
+  if (selection.occupied > 0 && !window.confirm(format(model.strings.fillOccupied, { count: selection.occupied }))) return;
+  var queue = [];
+  for (var i = 0; i < selection.rows; i += 1) queue.push(i);
+  job = {
+    sheetName: selection.sheetName, row: selection.row, column: selection.column, country: el('country').value,
+    queue: queue, total: selection.rows, done: 0, ok: 0, failed: 0, cancelled: false
+  };
+  setRunning(true);
+  updateProgress();
+  google.script.run.withSuccessHandler(nextChunk).withFailureHandler(function (error) {
+    finish(error && error.message ? error.message : String(error), true);
+  }).pgpsWriteHeaders({
+    sheetName: selection.sheetName, headerRow: selection.headerRow, column: selection.column
+  });
+}
+
+el('fillStart').onclick = function () {
+  setStatus('fillStatus', '', false);
+  google.script.run.withSuccessHandler(start).withFailureHandler(fail('fillStatus'))
+    .pgpsInspectSelection(el('header').checked);
+};
+
+el('fillStop').onclick = function () { if (job) job.cancelled = true; };
+
+google.script.run.withSuccessHandler(applyModel).withFailureHandler(fail('keyStatus')).pgpsSidebarModel();
+</script>
+</body>
+</html>

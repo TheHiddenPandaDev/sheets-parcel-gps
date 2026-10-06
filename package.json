@@ -1,0 +1,17 @@
+{
+  "name": "sheets-parcel-gps",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Google Sheets functions for the Parcel GPS API: official cadastral parcels from 29 European countries",
+  "license": "MIT",
+  "scripts": {
+    "build": "node scripts/build.js",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "push": "npm run build && clasp push"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^3.2.4",
+    "vitest": "^3.2.4"
+  }
+}
